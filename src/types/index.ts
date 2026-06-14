@@ -112,4 +112,5 @@ export const STORAGE_KEYS = {
   BRAND_TONES: 'ai_toolbox_brand_tones',
   USAGE_STATS: 'ai_toolbox_usage_stats',
   TEAM_MEMBERS: 'ai_toolbox_team_members',
+  LAST_SELECTED_USER: 'ai_toolbox_last_selected_user',
 } as const;

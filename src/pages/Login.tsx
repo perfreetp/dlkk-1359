@@ -6,6 +6,7 @@ import { Input } from '../components/ui/Input';
 import { Card, CardContent } from '../components/ui/Card';
 import { useUserStore } from '../store/useUserStore';
 import { mockUsers } from '../mock/users';
+import { STORAGE_KEYS } from '../types';
 import { cn } from '../lib/utils';
 
 const Login: React.FC = () => {
@@ -14,7 +15,14 @@ const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedUserId, setSelectedUserId] = useState('user-001');
+  const [selectedUserId, setSelectedUserId] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.LAST_SELECTED_USER);
+      return stored || 'user-001';
+    } catch {
+      return 'user-001';
+    }
+  });
   
   const { login, currentUser } = useUserStore();
   const navigate = useNavigate();
@@ -28,6 +36,13 @@ const Login: React.FC = () => {
     }
   }, [currentUser, navigate]);
 
+  useEffect(() => {
+    const user = mockUsers.find(u => u.id === selectedUserId);
+    if (user) {
+      setEmail(user.email);
+    }
+  }, [selectedUserId]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -38,6 +53,9 @@ const Login: React.FC = () => {
     const success = login(email);
     
     if (success) {
+      try {
+        localStorage.setItem(STORAGE_KEYS.LAST_SELECTED_USER, selectedUserId);
+      } catch {}
       navigate('/');
     } else {
       setError('登录失败，请检查邮箱和密码');
@@ -47,11 +65,10 @@ const Login: React.FC = () => {
   };
 
   const handleQuickSelect = (userId: string) => {
-    const user = mockUsers.find(u => u.id === userId);
-    if (user) {
-      setEmail(user.email);
-      setSelectedUserId(userId);
-    }
+    setSelectedUserId(userId);
+    try {
+      localStorage.setItem(STORAGE_KEYS.LAST_SELECTED_USER, userId);
+    } catch {}
   };
 
   return (

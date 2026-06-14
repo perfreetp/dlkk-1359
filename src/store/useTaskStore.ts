@@ -46,18 +46,7 @@ function saveToStorage(key: string, value: any): void {
 function ensureUserHasMockTasks(userId: string, allTasks: Task[]): Task[] {
   const userTasks = allTasks.filter(t => t.userId === userId);
   if (userTasks.length > 0) return allTasks;
-  
-  const now = Date.now();
-  const newMockTasks = mockTasks.map((t, i) => ({
-    ...t,
-    id: `${userId}-mock-${i}-${now}`,
-    userId,
-    createdBy: userId,
-    createdAt: new Date(now - i * 24 * 60 * 60 * 1000).toISOString(),
-    outputs: t.outputs.map(o => ({ ...o, createdAt: new Date(now - i * 24 * 60 * 60 * 1000).toISOString() })),
-  }));
-  
-  return [...allTasks, ...newMockTasks];
+  return allTasks;
 }
 
 export const useTaskStore = create<TaskStore>((set, get) => ({
