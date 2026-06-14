@@ -10,13 +10,21 @@ import History from './pages/History';
 import Account from './pages/Account';
 import TeamManagement from './pages/TeamManagement';
 import { useUserStore } from './store/useUserStore';
+import { useTaskStore } from './store/useTaskStore';
 
 const ProtectedRoute = ({ children, requireManager = false }: { children: React.ReactNode; requireManager?: boolean }) => {
-  const { currentUser, init } = useUserStore();
+  const { currentUser, init: initUser } = useUserStore();
+  const { init: initTasks } = useTaskStore();
 
   useEffect(() => {
-    init();
-  }, [init]);
+    initUser();
+  }, [initUser]);
+
+  useEffect(() => {
+    if (currentUser) {
+      initTasks(currentUser.id, currentUser.role);
+    }
+  }, [currentUser, initTasks]);
 
   if (!currentUser) {
     return <Navigate to="/login" replace />;

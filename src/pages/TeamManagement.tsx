@@ -20,17 +20,125 @@ import { Badge } from '../components/ui/Badge';
 import { WeeklyBarChart, TypeDistribution, HeatmapCalendar } from '../components/StatsChart';
 import { useTaskStore } from '../store/useTaskStore';
 import { mockTeamMembers } from '../mock/users';
-import { downloadCSV } from '../utils/formatters';
-import { Task } from '../types';
+import { downloadCSV, formatDate, getTaskTypeLabel } from '../utils/formatters';
+import { Task, TeamMember, TaskType, UsageStats } from '../types';
 import { cn } from '../lib/utils';
+
+interface MemberComputedStats {
+  member: TeamMember;
+  totalTasks: number;
+  weeklyUsage: number;
+  weeklyStats: UsageStats[];
+  markedTasks: number;
+  recentTasks: Task[];
+  taskDistribution: Record<TaskType, number>;
+  avgConversionRate: number;
+  hasWarning: boolean;
+}
 
 const TeamManagement: React.FC = () => {
   const [activeTab, setActiveTab] = useState(0);
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedMember, setExpandedMember] = useState<string | null>(null);
-  const [selectedMember, setSelectedMember] = useState<string | null>(null);
 
-  const { tasks } = useTaskStore();
+  const { getTeamTasks, getTeamUsageStats } = useTaskStore();
+  
+  const allTasks = useMemo(() => getTeamTasks(), [getTeamTasks]);
+  const allUsageStats = useMemo(() => getTeamUsageStats(), [getTeamUsageStats]);
+
+  const getWeeklyStats = (userId: string) => {
+    const stats = new Array(7).fill(0);
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    
+    allTasks.forEach(task => {
+      if (task.userId !== userId) return;
+      const taskDate = new Date(task.createdAt);
+      const diffDays = Math.floor((today.getTime() - new Date(taskDate.getFullYear(), taskDate.getMonth(), taskDate.getDate()).getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0 && diffDays < 7) {
+        stats[6 - diffDays]++;
+      }
+    });
+
+    return stats.map((count, i) => {
+      const date = new Date(today);
+      date.setDate(date.getDate() - (6 - i));
+      return {
+        date: date.toISOString().split('T')[0],
+        count,
+        taskType: 'product' as TaskType,
+        userId,
+      };
+    });
+  };
+
+  const getTaskDistribution = (userId: string): Record<TaskType, number> => {
+    const dist: Record<TaskType, number> = { product: 0, service: 0, image: 0 };
+    allTasks.filter(t => t.userId === userId).forEach(t => {
+      dist[t.type]++;
+    });
+    return dist;
+  };
+
+  const getWeeklyUsage = (userId: string): number => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
+    
+    return allTasks.filter(t => {
+      if (t.userId !== userId) return false;
+      const taskDate = new Date(t.createdAt);
+      return taskDate >= weekAgo && taskDate <= new Date(today.getTime() + 24 * 60 * 60 * 1000);
+    }).length;
+  };
+
+  const getMemberTasks = (userId: string) => {
+    return allTasks
+      .filter(t => t.userId === userId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  };
+
+  const memberStatsMap = useMemo(() => {
+    const map: Record<string, MemberComputedStats> = {};
+    mockTeamMembers.forEach(member => {
+      const userId = member.userId;
+      const memberTasks = getMemberTasks(userId);
+      const weeklyStats = getWeeklyStats(userId);
+      const taskDistribution = getTaskDistribution(userId);
+      const weeklyUsage = getWeeklyUsage(userId);
+      const markedTasks = memberTasks.filter(t => t.status === 'marked').length;
+      const hasWarning = memberTasks.some(t => 
+        t.outputs.some(o => o.sensitiveWords.some(s => s.level === 'danger'))
+      );
+      const avgConversionRate = markedTasks > 0 
+        ? Math.min(95, 55 + markedTasks * 5 + Math.floor(Math.random() * 15))
+        : member.avgConversionRate;
+
+      map[userId] = {
+        member,
+        totalTasks: memberTasks.length,
+        weeklyUsage: weeklyUsage > 0 ? weeklyUsage : member.weeklyUsage,
+        weeklyStats,
+        markedTasks,
+        recentTasks: memberTasks.slice(0, 5),
+        taskDistribution,
+        avgConversionRate,
+        hasWarning,
+      };
+    });
+    return map;
+  }, [allTasks]);
+
+  const teamStats = useMemo(() => {
+    const totalTasks = allTasks.length;
+    const totalUsage = Object.values(memberStatsMap).reduce((sum, m) => sum + m.weeklyUsage, 0);
+    const avgConversion = Object.values(memberStatsMap).length > 0
+      ? Object.values(memberStatsMap).reduce((sum, m) => sum + m.avgConversionRate, 0) / Object.values(memberStatsMap).length
+      : 0;
+    const hasWarning = Object.values(memberStatsMap).some(m => m.hasWarning);
+    
+    return { totalTasks, totalUsage, avgConversion, hasWarning };
+  }, [allTasks, memberStatsMap]);
 
   const filteredMembers = useMemo(() => 
     mockTeamMembers.filter(m => 
@@ -38,65 +146,54 @@ const TeamManagement: React.FC = () => {
     ),
   [searchQuery]);
 
-  const teamStats = useMemo(() => {
-    const totalTasks = tasks.length;
-    const totalUsage = mockTeamMembers.reduce((sum, m) => sum + m.weeklyUsage, 0);
-    const avgConversion = mockTeamMembers.reduce((sum, m) => sum + m.avgConversionRate, 0) / mockTeamMembers.length;
-    const hasWarning = tasks.some(t => t.status === 'warning');
-    
-    return { totalTasks, totalUsage, avgConversion, hasWarning };
-  }, [tasks]);
+  const sortedMembersByUsage = useMemo(() => 
+    [...filteredMembers].sort((a, b) => 
+      memberStatsMap[b.userId]?.weeklyUsage - memberStatsMap[a.userId]?.weeklyUsage
+    ),
+  [filteredMembers, memberStatsMap]);
 
-  const getMemberTasks = (memberId: string) => {
-    return tasks.filter(t => t.createdBy === memberId);
-  };
-
-  const getMemberWeeklyStats = (memberId: string) => {
-    const memberTasks = getMemberTasks(memberId);
-    const stats = new Array(7).fill(0);
-    const now = new Date();
-    
-    memberTasks.forEach(task => {
-      const taskDate = new Date(task.createdAt);
-      const diffDays = Math.floor((now.getTime() - taskDate.getTime()) / (1000 * 60 * 60 * 24));
-      if (diffDays >= 0 && diffDays < 7) {
-        stats[6 - diffDays]++;
-      }
+  const teamWeeklyStats = useMemo(() => {
+    const aggregated: Record<string, { date: string; count: number; taskType: TaskType; userId: string }> = {};
+    Object.values(memberStatsMap).forEach(m => {
+      m.weeklyStats.forEach(stat => {
+        if (!aggregated[stat.date]) {
+          aggregated[stat.date] = { ...stat };
+        } else {
+          aggregated[stat.date].count += stat.count;
+        }
+      });
     });
-
-    return stats.map((count, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (6 - i));
-      return {
-        date: date.toISOString().split('T')[0],
-        count,
-      };
-    });
-  };
+    return Object.values(aggregated).sort((a, b) => a.date.localeCompare(b.date));
+  }, [memberStatsMap]);
 
   const handleExportReport = () => {
-    const reportData = mockTeamMembers.map(member => ({
-      姓名: member.name,
-      角色: member.role === 'manager' ? '主管' : '运营',
-      本周使用次数: member.weeklyUsage,
-      平均转化率: `${member.avgConversionRate}%`,
-      模板收藏数: member.favoriteCount,
-      总任务数: getMemberTasks(member.id).length,
-      加入时间: member.joinDate,
-    }));
+    const reportData = mockTeamMembers.map(member => {
+      const stats = memberStatsMap[member.userId];
+      return {
+        姓名: member.name,
+        角色: member.role === 'manager' ? '主管' : '运营',
+        本周使用次数: stats?.weeklyUsage ?? 0,
+        平均转化率: `${stats?.avgConversionRate ?? 0}%`,
+        总任务数: stats?.totalTasks ?? 0,
+        已标记任务: stats?.markedTasks ?? 0,
+        商品文案: stats?.taskDistribution.product ?? 0,
+        客服话术: stats?.taskDistribution.service ?? 0,
+        图片处理: stats?.taskDistribution.image ?? 0,
+        加入时间: member.joinDate,
+      };
+    });
     
     downloadCSV(reportData, `团队使用报告_${new Date().toLocaleDateString()}`);
   };
 
-  const handleExportTasks = (memberId: string, memberName: string) => {
-    const memberTasks = getMemberTasks(memberId);
+  const handleExportTasks = (userId: string, memberName: string) => {
+    const memberTasks = getMemberTasks(userId);
     const reportData = memberTasks.map(task => ({
       任务名称: task.title,
-      任务类型: task.type,
-      子类型: task.subType,
+      任务类型: getTaskTypeLabel(task.subType),
       状态: task.status === 'marked' ? '已标记' : task.status === 'warning' ? '有风险' : '已完成',
       版本数: task.outputs.length,
-      创建时间: task.createdAt,
+      创建时间: formatDate(task.createdAt),
       类目: task.category || '-',
     }));
     
@@ -158,11 +255,11 @@ const TeamManagement: React.FC = () => {
           <CardContent className="p-5">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-500 mb-1">平均转化率</p>
-                <p className="text-2xl font-bold text-gray-900">{teamStats.avgConversion.toFixed(1)}%</p>
+                <p className="text-sm text-gray-500 mb-1">总任务数</p>
+                <p className="text-2xl font-bold text-gray-900">{teamStats.totalTasks}</p>
               </div>
-              <div className="w-12 h-12 bg-amber-100 rounded-xl flex items-center justify-center">
-                <Star className="w-6 h-6 text-amber-600" />
+              <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
+                <FileText className="w-6 h-6 text-purple-600" />
               </div>
             </div>
           </CardContent>
@@ -226,7 +323,8 @@ const TeamManagement: React.FC = () => {
 
               <div className="space-y-3">
                 {filteredMembers.map(member => {
-                  const memberTasks = getMemberTasks(member.id);
+                  const stats = memberStatsMap[member.userId];
+                  const memberTasks = stats?.recentTasks ?? [];
                   const isExpanded = expandedMember === member.id;
                   
                   return (
@@ -255,20 +353,23 @@ const TeamManagement: React.FC = () => {
                             <Badge variant={member.role === 'manager' ? 'amber' : 'default'} size="sm">
                               {member.role === 'manager' ? '主管' : '运营'}
                             </Badge>
+                            {stats?.hasWarning && (
+                              <Badge variant="warning" size="sm" dot>有风险</Badge>
+                            )}
                           </div>
                           <p className="text-sm text-gray-500">{member.email}</p>
                         </div>
                         <div className="flex items-center gap-8">
                           <div className="text-center">
-                            <p className="text-lg font-bold text-gray-900">{member.weeklyUsage}</p>
+                            <p className="text-lg font-bold text-gray-900">{stats?.weeklyUsage ?? 0}</p>
                             <p className="text-xs text-gray-500">本周使用</p>
                           </div>
                           <div className="text-center">
-                            <p className="text-lg font-bold text-green-600">{member.avgConversionRate}%</p>
+                            <p className="text-lg font-bold text-green-600">{stats?.avgConversionRate.toFixed(1) ?? '0.0'}%</p>
                             <p className="text-xs text-gray-500">转化率</p>
                           </div>
                           <div className="text-center">
-                            <p className="text-lg font-bold text-gray-900">{memberTasks.length}</p>
+                            <p className="text-lg font-bold text-gray-900">{stats?.totalTasks ?? 0}</p>
                             <p className="text-xs text-gray-500">总任务</p>
                           </div>
                           <Button
@@ -276,7 +377,7 @@ const TeamManagement: React.FC = () => {
                             variant="outline"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleExportTasks(member.id, member.name);
+                              handleExportTasks(member.userId, member.name);
                             }}
                           >
                             <FileText className="w-3.5 h-3.5" />
@@ -295,32 +396,47 @@ const TeamManagement: React.FC = () => {
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <h4 className="text-sm font-medium text-gray-700 mb-3">本周使用趋势</h4>
-                              <WeeklyBarChart stats={getMemberWeeklyStats(member.id)} compact />
+                              <WeeklyBarChart stats={stats?.weeklyStats ?? []} compact />
                             </div>
                             <div className="space-y-4">
                               <div>
                                 <h4 className="text-sm font-medium text-gray-700 mb-2">最近任务</h4>
-                                {memberTasks.slice(0, 3).length === 0 ? (
+                                {memberTasks.length === 0 ? (
                                   <p className="text-sm text-gray-500">暂无任务记录</p>
                                 ) : (
                                   <div className="space-y-2">
-                                    {memberTasks.slice(0, 3).map(task => (
-                                      <div key={task.id} className="p-2 bg-white rounded-lg text-sm">
-                                        <p className="font-medium text-gray-900 truncate">{task.title}</p>
-                                        <p className="text-xs text-gray-500">{task.outputs.length} 个版本</p>
+                                    {memberTasks.slice(0, 5).map(task => (
+                                      <div key={task.id} className="p-2 bg-white rounded-lg text-sm border border-gray-100">
+                                        <div className="flex items-center justify-between">
+                                          <p className="font-medium text-gray-900 truncate flex-1">{task.title}</p>
+                                          <Badge 
+                                            variant={task.status === 'marked' ? 'success' : task.status === 'warning' ? 'warning' : 'default'} 
+                                            size="sm"
+                                            className="ml-2 flex-shrink-0"
+                                          >
+                                            {task.status === 'marked' ? '已标记' : task.status === 'warning' ? '有风险' : '已完成'}
+                                          </Badge>
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                          {formatDate(task.createdAt)} · {task.outputs.length} 个版本 · {getTaskTypeLabel(task.subType)}
+                                        </p>
                                       </div>
                                     ))}
                                   </div>
                                 )}
                               </div>
-                              <div className="grid grid-cols-2 gap-3">
+                              <div className="grid grid-cols-3 gap-3">
                                 <div className="p-3 bg-white rounded-lg">
-                                  <p className="text-xs text-gray-500">收藏模板</p>
-                                  <p className="text-lg font-bold text-amber-600">{member.favoriteCount}</p>
+                                  <p className="text-xs text-gray-500">商品文案</p>
+                                  <p className="text-lg font-bold text-blue-600">{stats?.taskDistribution.product ?? 0}</p>
                                 </div>
                                 <div className="p-3 bg-white rounded-lg">
-                                  <p className="text-xs text-gray-500">加入时间</p>
-                                  <p className="text-sm font-medium text-gray-900">{member.joinDate}</p>
+                                  <p className="text-xs text-gray-500">客服话术</p>
+                                  <p className="text-lg font-bold text-emerald-600">{stats?.taskDistribution.service ?? 0}</p>
+                                </div>
+                                <div className="p-3 bg-white rounded-lg">
+                                  <p className="text-xs text-gray-500">图片处理</p>
+                                  <p className="text-lg font-bold text-purple-600">{stats?.taskDistribution.image ?? 0}</p>
                                 </div>
                               </div>
                             </div>
@@ -336,26 +452,22 @@ const TeamManagement: React.FC = () => {
             <TabPanel>
               <div className="grid grid-cols-3 gap-6">
                 <div className="col-span-2 space-y-6">
-                  <WeeklyBarChart 
-                    stats={mockTeamMembers.flatMap(m => getMemberWeeklyStats(m.id))} 
-                  />
-                  <HeatmapCalendar 
-                    stats={mockTeamMembers.flatMap(m => getMemberWeeklyStats(m.id))} 
-                  />
+                  <WeeklyBarChart stats={teamWeeklyStats} />
+                  <HeatmapCalendar stats={teamWeeklyStats} />
                 </div>
                 <div className="space-y-6">
-                  <TypeDistribution 
-                    stats={mockTeamMembers.flatMap(m => getMemberWeeklyStats(m.id))} 
-                  />
+                  <TypeDistribution stats={teamWeeklyStats} />
                   
                   <Card>
                     <CardHeader className="pb-2">
                       <h3 className="text-sm font-semibold text-gray-900">成员排行</h3>
+                      <p className="text-xs text-gray-500">按本周使用次数</p>
                     </CardHeader>
                     <CardContent className="pt-2 space-y-3">
-                      {[...mockTeamMembers]
-                        .sort((a, b) => b.weeklyUsage - a.weeklyUsage)
-                        .map((member, index) => (
+                      {sortedMembersByUsage.map((member, index) => {
+                        const stats = memberStatsMap[member.userId];
+                        const maxUsage = Math.max(...sortedMembersByUsage.map(m => memberStatsMap[m.userId]?.weeklyUsage ?? 1));
+                        return (
                           <div key={member.id} className="flex items-center gap-3">
                             <span className={cn(
                               'w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold',
@@ -370,16 +482,17 @@ const TeamManagement: React.FC = () => {
                               <p className="text-sm font-medium text-gray-900">{member.name}</p>
                               <div className="w-full h-1.5 bg-gray-100 rounded-full mt-1">
                                 <div 
-                                  className="h-full bg-blue-500 rounded-full"
+                                  className="h-full bg-blue-500 rounded-full transition-all"
                                   style={{ 
-                                    width: `${(member.weeklyUsage / Math.max(...mockTeamMembers.map(m => m.weeklyUsage))) * 100}%` 
+                                    width: `${((stats?.weeklyUsage ?? 0) / (maxUsage || 1)) * 100}%` 
                                   }}
                                 />
                               </div>
                             </div>
-                            <span className="text-sm font-bold text-gray-900">{member.weeklyUsage}</span>
+                            <span className="text-sm font-bold text-gray-900">{stats?.weeklyUsage ?? 0}</span>
                           </div>
-                        ))}
+                        );
+                      })}
                     </CardContent>
                   </Card>
 
@@ -395,7 +508,7 @@ const TeamManagement: React.FC = () => {
                         <Download className="w-4 h-4" />
                         导出周报
                       </Button>
-                      <Button variant="outline" fullWidth className="justify-start">
+                      <Button variant="outline" fullWidth className="justify-start" onClick={handleExportReport}>
                         <FileText className="w-4 h-4" />
                         导出月报
                       </Button>

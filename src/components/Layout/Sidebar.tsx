@@ -72,17 +72,17 @@ export const Sidebar: React.FC = () => {
           {currentUser?.role === 'manager' && (
             <li>
               <NavLink
-                to="/account/team"
+                to="/team-management"
                 className={cn(
                   'flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200',
-                  location.pathname === '/account/team'
+                  location.pathname === '/team-management'
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30'
                     : 'text-gray-400 hover:text-white hover:bg-gray-800'
                 )}
               >
                 <Users className="w-5 h-5" />
                 <span>团队管理</span>
-                {location.pathname === '/account/team' && (
+                {location.pathname === '/team-management' && (
                   <span className="ml-auto w-1.5 h-1.5 bg-white rounded-full" />
                 )}
               </NavLink>

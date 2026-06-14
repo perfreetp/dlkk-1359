@@ -48,7 +48,7 @@ const History: React.FC = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [markAsTemplateSuccess, setMarkAsTemplateSuccess] = useState<string | null>(null);
 
-  const { tasks, deleteTask, updateTaskOutput } = useTaskStore();
+  const { tasks, deleteTask, markOutput } = useTaskStore();
   const { addTemplate } = useTemplateStore();
   const { copy, copied } = useClipboard();
 
@@ -78,24 +78,7 @@ const History: React.FC = () => {
   };
 
   const handleToggleMark = (taskId: string, outputId: string) => {
-    const task = tasks.find(t => t.id === taskId);
-    if (!task) return;
-    
-    const output = task.outputs.find(o => o.id === outputId);
-    if (!output) return;
-
-    updateTaskOutput(taskId, outputId, { isMarked: !output.isMarked });
-    
-    const allMarked = task.outputs
-      .filter(o => o.id !== outputId)
-      .every(o => o.isMarked);
-    const anyMarked = task.outputs.some(o => o.isMarked || o.id === outputId);
-    
-    if (!output.isMarked && (anyMarked || !allMarked)) {
-      useTaskStore.getState().updateTask(taskId, { status: 'marked' });
-    } else if (output.isMarked && !anyMarked) {
-      useTaskStore.getState().updateTask(taskId, { status: 'completed' });
-    }
+    markOutput(taskId, outputId);
   };
 
   const handleSaveAsTemplate = (task: Task, outputId: string) => {

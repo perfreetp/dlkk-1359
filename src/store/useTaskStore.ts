@@ -1,14 +1,16 @@
 import { create } from 'zustand';
-import type { Task, TaskOutput, TaskType, TaskStatus, UsageStats } from '../types';
+import type { Task, TaskOutput, TaskType, TaskStatus, UsageStats, UserRole } from '../types';
 import { STORAGE_KEYS } from '../types';
 import { mockTasks } from '../mock/tasks';
 import { generateId } from '../utils/formatters';
 
 interface TaskStore {
   tasks: Task[];
+  allTasks: Task[];
   usageStats: UsageStats[];
+  allUsageStats: UsageStats[];
   loading: boolean;
-  init: (userId: string) => void;
+  init: (userId: string, role?: UserRole) => void;
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'isFavorite'>) => Task;
   updateTask: (id: string, updates: Partial<Task>) => void;
   updateTaskOutput: (taskId: string, outputId: string, updates: Partial<TaskOutput>) => void;
@@ -23,6 +25,9 @@ interface TaskStore {
     keyword?: string;
   }) => Task[];
   getTaskById: (id: string) => Task | undefined;
+  getTeamTasks: () => Task[];
+  getTeamUsageStats: () => UsageStats[];
+  getTasksByUserId: (userId: string) => Task[];
 }
 
 function loadFromStorage<T>(key: string, defaultValue: T): T {
@@ -38,24 +43,47 @@ function saveToStorage(key: string, value: any): void {
   localStorage.setItem(key, JSON.stringify(value));
 }
 
+function ensureUserHasMockTasks(userId: string, allTasks: Task[]): Task[] {
+  const userTasks = allTasks.filter(t => t.userId === userId);
+  if (userTasks.length > 0) return allTasks;
+  
+  const now = Date.now();
+  const newMockTasks = mockTasks.map((t, i) => ({
+    ...t,
+    id: `${userId}-mock-${i}-${now}`,
+    userId,
+    createdBy: userId,
+    createdAt: new Date(now - i * 24 * 60 * 60 * 1000).toISOString(),
+    outputs: t.outputs.map(o => ({ ...o, createdAt: new Date(now - i * 24 * 60 * 60 * 1000).toISOString() })),
+  }));
+  
+  return [...allTasks, ...newMockTasks];
+}
+
 export const useTaskStore = create<TaskStore>((set, get) => ({
   tasks: [],
+  allTasks: [],
   usageStats: [],
+  allUsageStats: [],
   loading: false,
   
-  init: (userId: string) => {
-    const tasks = loadFromStorage<Task[]>(STORAGE_KEYS.TASKS, []);
-    const usageStats = loadFromStorage<UsageStats[]>(STORAGE_KEYS.USAGE_STATS, []);
+  init: (userId: string, role?: UserRole) => {
+    let allTasks = loadFromStorage<Task[]>(STORAGE_KEYS.TASKS, []);
+    let allUsageStats = loadFromStorage<UsageStats[]>(STORAGE_KEYS.USAGE_STATS, []);
     
-    let userTasks = tasks.filter(t => t.userId === userId);
-    let userStats = usageStats.filter(s => s.userId === userId);
+    allTasks = ensureUserHasMockTasks(userId, allTasks);
+    saveToStorage(STORAGE_KEYS.TASKS, allTasks);
     
-    if (userTasks.length === 0) {
-      userTasks = mockTasks.map(t => ({ ...t, userId }));
-      saveToStorage(STORAGE_KEYS.TASKS, userTasks);
-    }
+    const isManager = role === 'manager';
+    const userTasks = isManager ? allTasks : allTasks.filter(t => t.userId === userId);
+    const userStats = isManager ? allUsageStats : allUsageStats.filter(s => s.userId === userId);
     
-    set({ tasks: userTasks, usageStats: userStats });
+    set({ 
+      tasks: userTasks, 
+      allTasks,
+      usageStats: userStats,
+      allUsageStats,
+    });
   },
   
   addTask: (taskData) => {
@@ -70,7 +98,13 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     allTasks.push(newTask);
     saveToStorage(STORAGE_KEYS.TASKS, allTasks);
     
-    set(state => ({ tasks: [newTask, ...state.tasks] }));
+    const isManager = taskData.userId && taskData.createdBy !== taskData.userId;
+    const shouldShow = true;
+    
+    set(state => ({ 
+      tasks: shouldShow ? [newTask, ...state.tasks] : state.tasks,
+      allTasks: [newTask, ...state.allTasks],
+    }));
     return newTask;
   },
   
@@ -84,6 +118,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       
       set(state => ({
         tasks: state.tasks.map(t => t.id === id ? { ...t, ...updates } : t),
+        allTasks: state.allTasks.map(t => t.id === id ? { ...t, ...updates } : t),
       }));
     }
   },
@@ -104,6 +139,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       
       set(state => ({
         tasks: state.tasks.map(t => t.id === taskId ? updatedTask : t),
+        allTasks: state.allTasks.map(t => t.id === taskId ? updatedTask : t),
       }));
     }
   },
@@ -132,6 +168,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       
       set(state => ({
         tasks: state.tasks.map(t => t.id === taskId ? updatedTask : t),
+        allTasks: state.allTasks.map(t => t.id === taskId ? updatedTask : t),
       }));
     }
   },
@@ -146,6 +183,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
       
       set(state => ({
         tasks: state.tasks.map(t => t.id === id ? { ...t, isFavorite: !t.isFavorite } : t),
+        allTasks: state.allTasks.map(t => t.id === id ? { ...t, isFavorite: !t.isFavorite } : t),
       }));
     }
   },
@@ -157,6 +195,7 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
     
     set(state => ({
       tasks: state.tasks.filter(t => t.id !== id),
+      allTasks: state.allTasks.filter(t => t.id !== id),
     }));
   },
   
@@ -186,7 +225,10 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
         s => !(s.date === today && s.taskType === taskType && s.userId === userId)
       );
       const updatedStat = existingIndex !== -1 ? allStats[existingIndex] : allStats[allStats.length - 1];
-      return { usageStats: [...userStats, updatedStat] };
+      return { 
+        usageStats: [...userStats, updatedStat],
+        allUsageStats: allStats,
+      };
     });
   },
   
@@ -202,6 +244,18 @@ export const useTaskStore = create<TaskStore>((set, get) => ({
   },
   
   getTaskById: (id) => {
-    return get().tasks.find(t => t.id === id);
+    return get().allTasks.find(t => t.id === id);
+  },
+
+  getTeamTasks: () => {
+    return get().allTasks;
+  },
+
+  getTeamUsageStats: () => {
+    return get().allUsageStats;
+  },
+
+  getTasksByUserId: (userId) => {
+    return get().allTasks.filter(t => t.userId === userId);
   },
 }));
