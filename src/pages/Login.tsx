@@ -14,10 +14,13 @@ const Login: React.FC = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedRole, setSelectedRole] = useState<'operator' | 'manager'>('operator');
+  const [selectedUserId, setSelectedUserId] = useState('user-001');
   
   const { login, currentUser } = useUserStore();
   const navigate = useNavigate();
+
+  const operatorUsers = mockUsers.filter(u => u.role === 'operator');
+  const managerUsers = mockUsers.filter(u => u.role === 'manager');
 
   useEffect(() => {
     if (currentUser) {
@@ -32,11 +35,7 @@ const Login: React.FC = () => {
 
     await new Promise(resolve => setTimeout(resolve, 800));
 
-    const targetEmail = selectedRole === 'manager' 
-      ? 'lijingli@example.com' 
-      : 'zhangxiaoming@example.com';
-    
-    const success = login(targetEmail);
+    const success = login(email);
     
     if (success) {
       navigate('/');
@@ -47,12 +46,12 @@ const Login: React.FC = () => {
     setIsLoading(false);
   };
 
-  const handleQuickLogin = (role: 'operator' | 'manager') => {
-    const targetEmail = role === 'manager' 
-      ? 'lijingli@example.com' 
-      : 'zhangxiaoming@example.com';
-    setEmail(targetEmail);
-    setSelectedRole(role);
+  const handleQuickSelect = (userId: string) => {
+    const user = mockUsers.find(u => u.id === userId);
+    if (user) {
+      setEmail(user.email);
+      setSelectedUserId(userId);
+    }
   };
 
   return (
@@ -62,7 +61,7 @@ const Login: React.FC = () => {
         <div className="absolute bottom-0 right-0 w-96 h-96 bg-amber-500/20 rounded-full blur-3xl translate-x-1/2 translate-y-1/2" />
       </div>
 
-      <div className="relative w-full max-w-md animate-fade-in">
+      <div className="relative w-full max-w-lg animate-fade-in">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-blue-500 to-blue-700 rounded-2xl shadow-2xl mb-4">
             <Sparkles className="w-8 h-8 text-white" />
@@ -74,36 +73,72 @@ const Login: React.FC = () => {
         <Card className="shadow-2xl border-0">
           <CardContent className="p-8">
             <div className="mb-6">
-              <p className="text-sm text-gray-600 mb-3">快速选择身份登录：</p>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => handleQuickLogin('operator')}
-                  className={cn(
-                    'p-3 rounded-lg border-2 transition-all text-left',
-                    selectedRole === 'operator'
-                      ? 'border-blue-500 bg-blue-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  )}
-                >
-                  <p className={cn('font-medium text-sm', selectedRole === 'operator' ? 'text-blue-700' : 'text-gray-700')}>
-                    普通运营
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">张小明</p>
-                </button>
-                <button
-                  onClick={() => handleQuickLogin('manager')}
-                  className={cn(
-                    'p-3 rounded-lg border-2 transition-all text-left',
-                    selectedRole === 'manager'
-                      ? 'border-amber-500 bg-amber-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  )}
-                >
-                  <p className={cn('font-medium text-sm', selectedRole === 'manager' ? 'text-amber-700' : 'text-gray-700')}>
-                    主管
-                  </p>
-                  <p className="text-xs text-gray-500 mt-0.5">李经理</p>
-                </button>
+              <p className="text-sm text-gray-600 mb-3">选择账号快速登录：</p>
+              
+              <div className="mb-4">
+                <p className="text-xs font-medium text-gray-500 mb-2">主管账号</p>
+                <div className="grid grid-cols-1 gap-2">
+                  {managerUsers.map(user => (
+                    <button
+                      key={user.id}
+                      onClick={() => handleQuickSelect(user.id)}
+                      className={cn(
+                        'p-3 rounded-lg border-2 transition-all text-left flex items-center gap-3',
+                        selectedUserId === user.id
+                          ? 'border-amber-500 bg-amber-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      )}
+                    >
+                      <img
+                        src={user.avatar}
+                        alt={user.name}
+                        className="w-10 h-10 rounded-full border-2 border-amber-200"
+                      />
+                      <div className="flex-1">
+                        <p className={cn('font-medium text-sm', selectedUserId === user.id ? 'text-amber-700' : 'text-gray-700')}>
+                          {user.name}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">{user.email}</p>
+                      </div>
+                      <span className="px-2 py-1 bg-amber-100 text-amber-700 text-xs font-medium rounded-md">
+                        主管
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium text-gray-500 mb-2">运营账号</p>
+                <div className="grid grid-cols-1 gap-2">
+                  {operatorUsers.map(user => (
+                    <button
+                      key={user.id}
+                      onClick={() => handleQuickSelect(user.id)}
+                      className={cn(
+                        'p-3 rounded-lg border-2 transition-all text-left flex items-center gap-3',
+                        selectedUserId === user.id
+                          ? 'border-blue-500 bg-blue-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      )}
+                    >
+                      <img
+                        src={user.avatar}
+                        alt={user.name}
+                        className="w-10 h-10 rounded-full border-2 border-blue-200"
+                      />
+                      <div className="flex-1">
+                        <p className={cn('font-medium text-sm', selectedUserId === user.id ? 'text-blue-700' : 'text-gray-700')}>
+                          {user.name}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-0.5">{user.email}</p>
+                      </div>
+                      <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-md">
+                        运营
+                      </span>
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -154,10 +189,10 @@ const Login: React.FC = () => {
 
             <div className="mt-6 pt-6 border-t border-gray-100">
               <p className="text-xs text-center text-gray-500">
-                演示账号：运营 zhangxiaoming@example.com / 主管 lijingli@example.com
+                选择上方任意账号，密码任意即可登录
               </p>
               <p className="text-xs text-center text-gray-400 mt-1">
-                密码：任意密码即可登录
+                每个账号的历史任务独立保存，互不影响
               </p>
             </div>
           </CardContent>
